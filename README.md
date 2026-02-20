@@ -28,3 +28,12 @@ TwinEyes คือสถาปัตยกรรมระบบรักษา�
   ```bash
   ollama pull gemma3:latest
   ollama pull nomic-embed-text
+- เปิดรัน Ollama server ทิ้งไว้เบื้องหลัง
+
+- ติดตั้ง Python Dependencies:
+
+pip install -r requirements.txt
+
+- เริ่มต้นการทำงานของระบบ:
+
+streamlit run app.py
