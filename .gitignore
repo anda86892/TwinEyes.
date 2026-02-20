@@ -1,0 +1,4 @@
+__pycache__/
+captures/
+yolov8n.pt
+log.txt
