@@ -11,16 +11,14 @@ from datetime import datetime
 from ultralytics import YOLO
 from streamlit.runtime.scriptrunner import add_script_run_ctx
 
-# ==========================================
-# 1. การตั้งค่าระบบกล้องเครือข่าย (Multi-Camera Config)
-# ==========================================
+
 CAMERAS_CONFIG = {
     "Camera 1 (Front)": "http://192.168.0.117/capture",
-    "Camera 2 (Back)": "http://192.168.0.118/capture" # แก้ IP ให้ตรงกับกล้องตัวที่ 2
+    "Camera 2 (Back)": "http://192.168.0.118/capture" 
 }
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "gemma3:latest" 
-DETECTION_COOLDOWN = 10 # หน่วงเวลาบันทึกประวัติ 10 วินาที เพื่อไม่ให้ Log ล้น
+DETECTION_COOLDOWN = 10 
 
 @st.cache_resource
 def load_yolo():
@@ -28,9 +26,7 @@ def load_yolo():
 
 yolo_model = load_yolo()
 
-# ==========================================
-# 2. การจัดการสถานะ (Session State)
-# ==========================================
+
 if 'system_running' not in st.session_state:
     st.session_state.system_running = False
 if 'is_thinking' not in st.session_state:
@@ -38,18 +34,16 @@ if 'is_thinking' not in st.session_state:
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = [] 
 if 'detection_log' not in st.session_state:
-    st.session_state.detection_log = [] # ถังเก็บประวัติการตรวจจับ
+    st.session_state.detection_log = [] 
 
-# โครงสร้างหน่วยความจำแยกตามกล้อง
+
 if 'cameras_data' not in st.session_state:
     st.session_state.cameras_data = {
         name: {"frame": None, "status": "Offline 🔴", "last_detect_time": 0} 
         for name in CAMERAS_CONFIG.keys()
     }
 
-# ==========================================
-# 3. Thread 1: กล้อง + YOLO (ทำงานแยกตามกล้อง)
-# ==========================================
+
 def fetch_camera_worker(cam_name, url):
     """ฟังก์ชันทำงานเบื้องหลังที่สามารถรันคู่ขนานกันหลายตัวได้"""
     session = requests.Session()
@@ -85,18 +79,18 @@ def fetch_camera_worker(cam_name, url):
                                 cv2.putText(img, f"Person {int(conf*100)}%", (x1, y1 - 10), 
                                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 
-                # ระบบบันทึกประวัติ (Debouncing Logic)
+                
                 if person_detected_in_frame:
                     current_time = time.time()
                     last_detect = st.session_state.cameras_data[cam_name]["last_detect_time"]
                     
-                    # ถ้าเจอคน และเวลาผ่านไปมากกว่า Cooldown ค่อยบันทึกใหม่
+                    
                     if current_time - last_detect > DETECTION_COOLDOWN:
                         log_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         st.session_state.detection_log.insert(0, f"[{log_time_str}] 🚨 พบคนวิ่งผ่าน {cam_name}")
                         st.session_state.cameras_data[cam_name]["last_detect_time"] = current_time
 
-                # อัปเดตภาพ
+                
                 st.session_state.cameras_data[cam_name]["frame"] = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             else:
                 st.session_state.cameras_data[cam_name]["status"] = "Offline 🔴"
@@ -106,12 +100,7 @@ def fetch_camera_worker(cam_name, url):
         
         time.sleep(0.05)
 
-# ==========================================
-# 4. Thread 2: คุยกับ Ollama 
-# ==========================================
-# ==========================================
-# 4.1 ระบบ RAG (Vector Database & Embedding)
-# ==========================================
+
 def get_embedding(text):
     """ส่งข้อความไปแปลงเป็นพิกัดเวกเตอร์ผ่าน Ollama"""
     response = requests.post("http://localhost:11434/api/embeddings", 
@@ -121,7 +110,7 @@ def get_embedding(text):
 def process_uploaded_file(uploaded_file):
     """อ่านไฟล์และหั่นเป็น Vector Database จำลอง"""
     text = ""
-    # 1. Parsing: อ่านข้อความจากไฟล์
+    
     if uploaded_file.name.endswith('.pdf'):
         pdf_reader = PyPDF2.PdfReader(uploaded_file)
         for page in pdf_reader.pages:
@@ -129,11 +118,11 @@ def process_uploaded_file(uploaded_file):
     else:
         text = uploaded_file.getvalue().decode("utf-8")
         
-    # 2. Chunking: หั่นข้อความเป็นท่อนๆ (ย่อหน้าละประมาณ 200 ตัวอักษร)
+    
     words = text.split()
     chunks = [' '.join(words[i:i+50]) for i in range(0, len(words), 50)]
     
-    # 3. Embedding: แปลงทุกท่อนเป็นตัวเลขแล้วเก็บใส่ State
+    
     st.session_state.vector_db = []
     progress_bar = st.progress(0)
     
@@ -149,17 +138,17 @@ def retrieve_relevant_rules(query, top_k=2):
     if 'vector_db' not in st.session_state or len(st.session_state.vector_db) == 0:
         return ""
         
-    # แปลงคำถามเป็นเวกเตอร์
+    
     query_vector = get_embedding(query)
     
-    # คำนวณความเหมือน (Dot Product)
+    
     scores = []
     for item in st.session_state.vector_db:
-        # คณิตศาสตร์หาความใกล้เคียงของเวกเตอร์
+        
         similarity = np.dot(query_vector, item["vector"]) / (np.linalg.norm(query_vector) * np.linalg.norm(item["vector"]))
         scores.append((similarity, item["text"]))
         
-    # เรียงลำดับและดึงข้อความที่คะแนนสูงสุดมาต่อกัน
+    
     scores.sort(key=lambda x: x[0], reverse=True)
     best_chunks = [score[1] for score in scores[:top_k]]
     return " ".join(best_chunks)
@@ -188,18 +177,16 @@ def ask_ollama_async(image_matrix, user_prompt, system_rule="Always answer in Th
     finally:
         st.session_state.is_thinking = False
 
-# ==========================================
-# 5. ส่วนแสดงผล UI (Layout & Sidebar)
-# ==========================================
+
 st.set_page_config(page_title="TwinEyes Hub", layout="wide")
 
-# แถบด้านข้าง: แสดงสถานะกล้องและประวัติ
+
 with st.sidebar:
     st.title("🎛️ Control Panel")
     if st.button("▶️ เริ่มระบบทั้งหมด" if not st.session_state.system_running else "⏹️ ปิดระบบทั้งหมด", use_container_width=True):
         st.session_state.system_running = not st.session_state.system_running
         if st.session_state.system_running:
-            # สั่งรัน Thread ตามจำนวนกล้องที่มี
+            
             for cam_name, cam_url in CAMERAS_CONFIG.items():
                 t = threading.Thread(target=fetch_camera_worker, args=(cam_name, cam_url), daemon=True)
                 add_script_run_ctx(t)
@@ -219,7 +206,7 @@ with st.sidebar:
     st.divider()
     st.subheader("📋 ประวัติการตรวจจับ (YOLO Log)")
     
-    # ลบประวัติเก่าถ้าเกิน 50 รายการ (Sliding Window)
+    
     while len(st.session_state.detection_log) > 50:
         st.session_state.detection_log.pop()
         
@@ -231,14 +218,14 @@ with st.sidebar:
             for log_entry in st.session_state.detection_log:
                 st.write(log_entry)
 
-# พื้นที่หลัก
+
 st.title("มองงง เธอสาวเธอสวยฉันจึงได้มองง")
 
 col1, col2 = st.columns([1.5, 1])
 
-# ฝั่งซ้าย: เลือกกล้องและแสดงวิดีโอ
+
 with col1:
-    # Dropdown ให้ผู้ใช้เลือกว่าจะดูกล้องไหน
+    
     selected_cam = st.selectbox("📷 เลือกกล้องที่ต้องการดูและวิเคราะห์:", list(CAMERAS_CONFIG.keys()))
     
     frame_placeholder = st.empty()
@@ -247,32 +234,32 @@ with col1:
     if st.session_state.system_running and active_frame is not None:
         frame_placeholder.image(active_frame, channels="RGB", use_container_width=True)
 
-        # --- โค้ดปุ่ม Capture ที่เพิ่มเข้ามาใหม่ ---
+        
         if st.button("📸 บันทึกภาพหลักฐาน (Capture)", use_container_width=True):
             try:
-                # 1. สร้างโฟลเดอร์ชื่อ 'captures' ในโฟลเดอร์เดียวกับโปรเจกต์ (ถ้ายังไม่มีให้สร้างใหม่)
+                
                 os.makedirs("captures", exist_ok=True)
                 
-                # 2. ดึงเวลาปัจจุบันมาทำเป็นชื่อไฟล์ (เพื่อไม่ให้ชื่อซ้ำกัน)
+                
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"captures/evidence_{selected_cam}_{timestamp}.jpg"
                 
-                # 3. แปลงสีจาก RGB กลับเป็น BGR ตามข้อจำกัดของ OpenCV
+                
                 bgr_frame = cv2.cvtColor(active_frame, cv2.COLOR_RGB2BGR)
                 
-                # 4. สั่งเขียนไฟล์ลงฮาร์ดดิสก์
+                
                 cv2.imwrite(filename, bgr_frame)
                 
-                # แจ้งเตือนว่าเซฟสำเร็จ
+                
                 st.success(f"บันทึกภาพสำเร็จ: โฟลเดอร์ {filename}")
             except Exception as e:
                 st.error(f"เกิดข้อผิดพลาดในการบันทึกภาพ: {e}")
-        # -----------------------------------
+        
 
     elif st.session_state.system_running and active_frame is None:
         frame_placeholder.warning(f"กำลังรอสัญญาณภาพจาก {selected_cam}...")
 
-# ฝั่งขวา: ระบบแชท AI
+
 with col2:
     st.subheader(f"💬 วิเคราะห์ภาพจาก {selected_cam}")
     
@@ -294,11 +281,11 @@ with col2:
             st.session_state.is_thinking = True
             st.session_state.chat_history.append({"role": "user", "content": "วิเคราะห์ภาพพร้อมอ้างอิงกฎของพื้นที่"})
             
-            # --- RAG Action ---
-            # 1. ค้นหากฎที่เกี่ยวกับ "การรักษาความปลอดภัยและคนแปลกหน้า"
+            
+            
             relevant_context = retrieve_relevant_rules("คนแปลกหน้า ผู้บุกรุก กฎความปลอดภัย")
             
-            # 2. นำกฎที่ค้นเจอไปแนบกับ System Prompt
+            
             rag_system_rule = f"""You are a strict security AI. 
             Analyze the image based STRICTLY on the following retrieved rules:
             
@@ -313,20 +300,20 @@ with col2:
             t2.start()
             st.rerun()
             
-    # 3. ช่องพิมพ์แชทถามคำถามเฉพาะเจาะจง (พร้อมระบบ RAG)
+    
     user_input = st.chat_input("ถามคำถามเกี่ยวกับกล้องที่เลือก...", disabled=st.session_state.is_thinking)
     if user_input:
         if active_frame is not None:
             st.session_state.is_thinking = True
             
-            # บันทึกคำถามผู้ใช้ลงประวัติแชทบนหน้าเว็บ
+            
             st.session_state.chat_history.append({"role": "user", "content": user_input})
             
-            # --- กลไก RAG สำหรับช่องแชท ---
-            # 1. RETRIEVAL: เอาคำถามของผู้ใช้ไปค้นหาในไฟล์ PDF/TXT
+            
+            
             relevant_context = retrieve_relevant_rules(user_input)
             
-            # 2. AUGMENTATION: สร้าง System Rule ใหม่โดยฝังกฎเข้าไป (ถ้าค้นเจอ)
+            
             if relevant_context.strip():
                 chat_rule = f"""You are a helpful security assistant. 
                 Answer the user's question based ONLY on the provided image and the following official rules:
@@ -337,10 +324,10 @@ with col2:
                 
                 Always answer in Thai language. If the image violates the rules, point it out."""
             else:
-                # ถ้าไม่ค้นเจอข้อมูลในไฟล์ หรือยังไม่ได้อัปโหลดไฟล์ ให้ตอบตามปกติ
+                
                 chat_rule = "You are a helpful security assistant. Answer based ONLY on the provided image. Answer in Thai."
             
-            # 3. GENERATION: ส่งคำถาม + ภาพ + กฎ (System Prompt) ให้ Gemma 3
+            
             t3 = threading.Thread(target=ask_ollama_async, args=(active_frame, user_input, chat_rule), daemon=True)
             add_script_run_ctx(t3)
             t3.start()
@@ -348,7 +335,7 @@ with col2:
         else:
             st.warning("ไม่มีสัญญาณภาพให้วิเคราะห์ครับ")
 
-# รักษาวงรอบการเรนเดอร์ UI
+
 if st.session_state.system_running:
     time.sleep(1.0) 
     st.rerun()
